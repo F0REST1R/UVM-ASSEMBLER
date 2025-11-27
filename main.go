@@ -69,10 +69,48 @@ func main() {
 	if *testMode {
 		displayTestResults(commands)
 	}
-
+	encoder := assembler.NewEncoder()
+	binaryProgram := make([]byte, 0, len(commands)*5) 
+	
 	if *outputFile != "" {
-		fmt.Printf("Бинарный файл будет сохранен как: %s \n", *outputFile)
+		for i, cmd := range commands {
+		machineCode, err := encoder.Encode(cmd)
+		if err != nil {
+			fmt.Printf("❌ Ошибка кодирования команды %d: %v\n", i+1, err)
+			os.Exit(1)
+    	}
+
+		binaryProgram = append(binaryProgram, machineCode...)
+		fmt.Printf("✅ Команда %d закодирована: %s\n", 
+			i+1, encoder.BytesToHexString(machineCode))
+		}
 	}
+
+	err = os.WriteFile(*outputFile, binaryProgram, 0644)
+	if err != nil {
+		fmt.Printf("❌ Ошибка записи файла: %v\n", err)
+        os.Exit(1)
+	}
+
+	fileInfo, _ := os.Stat(*outputFile)
+	fmt.Printf("\n💾 Размер двоичного файла: %d байт\n", fileInfo.Size())
+    fmt.Printf("📦 Количество команд: %d\n", len(commands))
+    fmt.Printf("💿 Общий размер: %d байт (%d команд × 5 байт)\n", 
+        len(commands)*5, len(commands))
+
+	if *testMode {
+        fmt.Println("\n БАЙТОВОЕ ПРЕДСТАВЛЕНИЕ (как в спецификации):")
+        fmt.Println("==============================================")
+        
+        for i, cmd := range commands {
+            machineCode, _ := encoder.Encode(cmd)
+            fmt.Printf("Команда %d: %s\n", i+1, encoder.BytesToHexString(machineCode))
+        }
+        
+        fmt.Println("\n СРАВНЕНИЕ С ТЕСТАМИ ИЗ СПЕЦИФИКАЦИИ:")
+        fmt.Println("======================================")
+        verifyByteTests(commands, encoder)
+    }
 }
 
 // displayTestResults выводит результаты в формате как в спецификации УВМ
@@ -175,4 +213,74 @@ func formatExpected(expected map[string]uint32) string {
 		return fmt.Sprintf("(A=%d, B=%d, C=%d, D=%d)", expected["A"], expected["B"], expected["C"], expected["D"])
 	}
 	return fmt.Sprintf("%v", expected)
+}
+
+// verifyByteTests проверяет соответствие байтовым тестам из спецификации
+func verifyByteTests(commands []assembler.Command, encoder *assembler.Encoder) {
+	expectedByteTests := []struct {
+		name     string
+		expected []byte
+	}{
+		{
+			"Загрузка константы (A=59, B=9, C=771)",
+			[]byte{0x7B, 0x32, 0x30, 0x00, 0x00},
+		},
+		{
+			"Чтение из памяти (A=8, B=499, C=42, D=35)",
+			[]byte{0xC8, 0x7C, 0x80, 0x3A, 0x02},
+		},
+		{
+			"Запись в память (A=37, B=25, C=3)", 
+			[]byte{0x65, 0x36, 0x00, 0x00, 0x00},
+		},
+		{
+			"Квадратный корень (A=4, B=9, C=804)",
+			[]byte{0x44, 0x42, 0x32, 0x00, 0x00},
+		},
+	}
+
+	allTestsPassed := true
+
+	for i, test := range expectedByteTests {
+		fmt.Printf("\nТест %d: %s\n", i+1, test.name)
+		fmt.Printf("  Ожидается: %s\n", encoder.BytesToHexString(test.expected))
+		
+		if i < len(commands) {
+			actual, err := encoder.Encode(commands[i])
+			if err != nil {
+				fmt.Printf("  ❌ Ошибка кодирования: %v\n", err)
+				allTestsPassed = false
+				continue
+			}
+			
+			fmt.Printf("  Получено:  %s\n", encoder.BytesToHexString(actual))
+			
+			// Сравниваем байты
+			match := true
+			for j := range test.expected {
+				if test.expected[j] != actual[j] {
+					match = false
+					break
+				}
+			}
+			
+			if match {
+				fmt.Printf("  ✅ Байты совпадают!\n")
+			} else {
+				fmt.Printf("  ❌ Байты не совпадают!\n")
+				allTestsPassed = false
+			}
+		} else {
+			fmt.Printf("  ❌ Нет команды для теста!\n")
+			allTestsPassed = false
+		}
+	}
+	
+	fmt.Println("\n" + strings.Repeat("═", 60))
+	if allTestsPassed {
+		fmt.Println("🎉 ВСЕ БАЙТОВЫЕ ТЕСТЫ ПРОЙДЕНЫ УСПЕШНО!")
+	} else {
+		fmt.Println("💥 НЕКОТОРЫЕ БАЙТОВЫЕ ТЕСТЫ НЕ ПРОЙДЕНЫ!")
+	}
+	fmt.Println(strings.Repeat("═", 60))
 }
